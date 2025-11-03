@@ -1,0 +1,8 @@
+﻿slither-analyzer==0.10.4
+crytic-compile
+datasets
+transformers
+pandas
+pyarrow
+tqdm
+pyyaml

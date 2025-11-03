@@ -1,0 +1,3 @@
+﻿seed: 42
+max_len: 510
+train_val_test: [0.8, 0.1, 0.1]

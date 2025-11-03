@@ -1,0 +1,20 @@
+﻿# python
+__pycache__/
+*.pyc
+
+# notebooks
+.ipynb_checkpoints/
+
+# data (giữ rỗng, dùng .gitkeep)
+data/raw/
+data/interim/
+data/processed/
+
+# caches
+*.cache/
+.cache/
+hf_cache/
+data/raw/hf_cache/
+
+# env
+.env

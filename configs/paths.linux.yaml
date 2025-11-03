@@ -1,0 +1,2 @@
+﻿BASE_DIR: /workspace/slither-ml-pipeline/data/interim
+HF_CACHE: /workspace/slither-ml-pipeline/data/raw/hf_cache

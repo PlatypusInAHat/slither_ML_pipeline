@@ -1,0 +1,2 @@
+﻿BASE_DIR: D:\\slither-ml-pipeline\\data\\interim   # chỗ chứa contracts/reports tạm
+HF_CACHE: D:\\slither-ml-pipeline\\data\\raw\\hf_cache
