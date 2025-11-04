@@ -7,6 +7,8 @@ from pathlib import Path
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
+START_IDX = 39826
+END_IDX   = 200000  # duyệt tới < 200000
 
 REPO_ROOT = Path(r"D:\slither-ml-pipeline")
 HF_CACHE_ROOT = REPO_ROOT / "cache" / "hf"
@@ -24,17 +26,25 @@ dataset = load_dataset(
     verification_mode="no_checks",
     cache_dir=r"D:\hf_cache",
 )
+# gốc repo (đổi lại nếu khác)
+REPO_ROOT     = Path(r"D:\slither-ml-pipeline")
 
-BASE_DIR = Path(r"D:\slither_hf")
-CONTRACT_DIR = BASE_DIR / "contracts"
-REPORT_DIR  = BASE_DIR / "reports"
-OUT_PATH    = BASE_DIR / "dataset_from_hf.jsonl"
+# nơi lưu file .sol tạm và báo cáo Slither (KHÔNG commit)
+DATA_INTERIM  = REPO_ROOT / "data" / "interim" / "slither"
+CONTRACT_DIR  = DATA_INTERIM / "contracts"
+REPORT_DIR    = DATA_INTERIM / "reports"
+
+# nơi ghi dataset đã xử lý để train
+DATA_PROCESSED = REPO_ROOT / "data" / "processed"
+OUT_PATH       = DATA_PROCESSED / "slither_big_multilabel.jsonl"
+
+# tạo thư mục nếu chưa có
+CONTRACT_DIR.mkdir(parents=True, exist_ok=True)
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
 
 CONTRACT_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
-
-tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
-MAX_TOKENS = 510
 
 # chỉ quan tâm 4 loại
 TARGET_LABELS = {
@@ -174,9 +184,11 @@ def extract_function_source(code: str, func_name: str) -> str:
 count_samples = 0
 count_skipped_pragma = 0
 
-with OUT_PATH.open("w", encoding="utf-8") as fout:
+with OUT_PATH.open("a", encoding="utf-8") as fout:
     for idx, example in enumerate(dataset):
-        if idx >= 1000000:
+        if idx < START_IDX:
+            continue
+        if idx >= END_IDX:
             break
 
         src = example["source_code"]
@@ -190,15 +202,19 @@ with OUT_PATH.open("w", encoding="utf-8") as fout:
             continue
 
         sol_path = CONTRACT_DIR / f"contract_{idx}.sol"
-        sol_path.write_text(src, encoding="utf-8")
+        if not sol_path.exists():
+            sol_path.write_text(src, encoding="utf-8")
 
         report_path = REPORT_DIR / f"contract_{idx}.json"
-        cmd = [
-            "python", "-m", "slither",
-            str(sol_path),
-            "--json", str(report_path),
-        ]
-        subprocess.run(cmd, check=False)
+
+        # chỉ chạy Slither nếu chưa có report để tiết kiệm thời gian
+        if not report_path.exists():
+            cmd = [
+                "python", "-m", "slither",
+                str(sol_path),
+                "--json", str(report_path),
+            ]
+            subprocess.run(cmd, check=False)
 
         if not report_path.exists():
             continue
@@ -207,7 +223,6 @@ with OUT_PATH.open("w", encoding="utf-8") as fout:
         if not vuln_map_all:
             continue
 
-        # lấy file trùng tên trước
         keys = [str(sol_path), sol_path.name, f"contracts/contract_{idx}.sol"]
         vuln_map = None
         for k in keys:
@@ -218,7 +233,6 @@ with OUT_PATH.open("w", encoding="utf-8") as fout:
             first_file = next(iter(vuln_map_all.keys()))
             vuln_map = vuln_map_all[first_file]
 
-        # đến đây chỉ còn 4 label
         for func_name, label in vuln_map.items():
             raw_func = extract_function_source(src, func_name)
             if not raw_func:
@@ -245,3 +259,4 @@ with OUT_PATH.open("w", encoding="utf-8") as fout:
 print("DONE.")
 print("samples ghi được:", count_samples)
 print("bỏ vì pragma:", count_skipped_pragma)
+
