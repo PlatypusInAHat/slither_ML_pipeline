@@ -1,19 +1,8 @@
-# src/utils/labels.py
-TARGET_LABELS = {
-    "reentrancy",
-    "timestamp_dependency",
-    "unchecked_call",
-    "tx_origin_misuse",
-}
+import yaml
 
-def normalize_label(name: str) -> str:
-    lower = name.lower()
-    if "reentr" in lower:
-        return "reentrancy"
-    if "timestamp" in lower or "time dependence" in lower or "predictable" in lower:
-        return "timestamp_dependency"
-    if "unchecked" in lower or "unhandled" in lower or "low level" in lower or "send" in lower:
-        return "unchecked_call"
-    if "tx.origin" in lower or "tx origin" in lower:
-        return "tx_origin_misuse"
-    return lower.replace(" ", "_")
+def load_labels(yaml_path: str):
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        y = yaml.safe_load(f)
+    label2id = y["labels"]
+    id2label = {v:k for k,v in label2id.items()}
+    return label2id, id2label

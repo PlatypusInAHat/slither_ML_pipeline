@@ -1,17 +1,5 @@
-﻿canonical:
-  reentrancy:
-    - reentrancy
-    - reentrancy-benign
-    - solidity_etrnancy
-    - external call to user-supplied address
-  timestamp_dependency:
-    - timestamp
-    - solidity_exact_time
-    - dependence on predictable environment variable
-  unchecked_call:
-    - unchecked-send
-    - unchecked-lowlevel
-    - unhandled-exceptions
-  tx_origin_misuse:
-    - tx-origin
-    - use of tx.origin
+﻿labels:
+  reentrancy: 0
+  timestamp_dependency: 1
+  unchecked_call: 2
+  tx_origin_misuse: 3

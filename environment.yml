@@ -1,8 +1,11 @@
-﻿name: slither-env
-channels:
-  - conda-forge
+﻿name: slither-ml
+channels: [pytorch, nvidia, conda-forge]
 dependencies:
   - python=3.10
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cudatoolkit
   - pip
   - pip:
       - -r requirements.txt

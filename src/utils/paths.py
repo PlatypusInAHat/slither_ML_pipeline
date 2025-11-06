@@ -1,17 +1,10 @@
-# src/utils/paths.py
-from dataclasses import dataclass
-import yaml
+from pathlib import Path
+import yaml, os
 
-@dataclass
-class PathsConfig:
-    base_dir: str
-    hf_cache: str | None = None
+def load_yaml(p): 
+    with open(p, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
-    @staticmethod
-    def from_yaml(path: str) -> "PathsConfig":
-        with open(path, "r", encoding="utf-8") as f:
-            d = yaml.safe_load(f)
-        return PathsConfig(
-            base_dir=d["BASE_DIR"],
-            hf_cache=d.get("HF_CACHE"),
-        )
+def get_project_root():
+    return Path(os.getcwd())  # hoặc cố định nếu muốn
+
