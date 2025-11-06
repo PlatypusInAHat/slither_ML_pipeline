@@ -213,6 +213,7 @@ Nếu mục tiêu là **phát hiện có/không lỗi**, cần thêm mẫu âm (
 
 ---
 
+
 ## Troubleshooting
 
 - **Cảnh báo** “one of PyTorch/TF/Flax not found”:  
@@ -229,7 +230,14 @@ Nếu mục tiêu là **phát hiện có/không lỗi**, cần thêm mẫu âm (
   Đã tắt stdout/stderr trong `runner.py`. Tuỳ chỉnh nếu cần debug.
 
 ---
+# Training baselines
 
+Các mô hình baseline theo **Lightning Cat**: Optimized-CodeBERT (fine-tune), Optimized-LSTM và Optimized-CNN (nhận embedding 768-d từ CodeBERT đã đóng băng). Siêu tham số mặc định bám sát bài báo (batch 128, epoch 60, dropout 0.1, L2 1e-4, gamma 0.98, BCEWithLogitsLoss). :contentReference[oaicite:6]{index=6}
+
+## Chuẩn bị
+```bash
+pip install -r requirements.txt
+# hoặc conda env create -f environment.yml
 ## License
 
 Mã nguồn pipeline theo giấy phép của repo này (MIT/Apache-2.0/GPL — tuỳ bạn).  
