@@ -16,6 +16,10 @@ class CodeBERTClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(mlp_hidden, num_classes)
         )
+        # Initialize output layer with small weights for multi-label stability
+        with torch.no_grad():
+            self.classifier[-1].weight.mul_(0.01)
+    
     def forward(self, input_ids, attention_mask):
         out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         # dùng [CLS] (pooler) nếu có, else lấy mean-pooling

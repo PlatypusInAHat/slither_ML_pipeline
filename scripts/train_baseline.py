@@ -1,5 +1,6 @@
 import argparse, yaml, torch
 from pathlib import Path
+import numpy as np
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
 from src.utils.labels import load_labels
@@ -44,7 +45,17 @@ def main():
     val_rel = cfg["data"]["val_ratio"] / (cfg["data"]["val_ratio"]+cfg["data"]["test_ratio"]) if (cfg["data"]["test_ratio"]>0) else 1.0
     val_idx, test_idx = train_test_split(tmp_idx, test_size=1-val_rel, random_state=cfg["data"]["seed"])
 
-    train_loader = DataLoader(Subset(ds, train_idx), batch_size=cfg["train"]["batch_size"], shuffle=True, num_workers=cfg["train"]["num_workers"])
+    # Tính pos_weight để xử lý class imbalance
+    train_subset = Subset(ds, train_idx)
+    all_labels = []
+    for i in range(len(train_subset)):
+        all_labels.append(train_subset[i]["labels"])
+    all_labels = np.array(all_labels)
+    pos_count = all_labels.sum(axis=0)
+    neg_count = len(all_labels) - pos_count
+    pos_weight = neg_count / (pos_count + 1e-8)  # tránh chia 0
+
+    train_loader = DataLoader(train_subset, batch_size=cfg["train"]["batch_size"], shuffle=True, num_workers=cfg["train"]["num_workers"])
     val_loader   = DataLoader(Subset(ds, val_idx),   batch_size=cfg["train"]["batch_size"], shuffle=False, num_workers=cfg["train"]["num_workers"])
     test_loader  = DataLoader(Subset(ds, test_idx),  batch_size=cfg["train"]["batch_size"], shuffle=False, num_workers=cfg["train"]["num_workers"])
 
@@ -52,10 +63,11 @@ def main():
     model = build_model(cfg, num_classes=len(label2id))
     use_amp = bool(cfg["train"]["mixed_precision"]) and device=="cuda"
 
+    print(f"[INFO] Class weights: {pos_weight}")
     train_loop(model, train_loader, val_loader,
                epochs=cfg["train"]["epochs"], lr=cfg["train"]["lr"],
                weight_decay=cfg["train"]["weight_decay"], gamma=cfg["train"]["gamma"],
-               device=device, use_amp=use_amp)
+               device=device, use_amp=use_amp, pos_weight=pos_weight)
 
     print("=== TEST ===")
     metrics = evaluate(model, test_loader, device, average=cfg["metrics"]["average"])

@@ -26,10 +26,10 @@ model:
 
 train:
   epochs: 60
-  batch_size: 128
-  lr: 1.0e-3          # theo paper cho Optimized-CodeBERT; nếu overfit, thử 5e-5
-  weight_decay: 1.0e-4
-  gamma: 0.98
+  batch_size: 32
+  lr: 2.0e-5          # Fine-tuning rate for CodeBERT (reduced from 1e-3)
+  weight_decay: 1.0e-2
+  gamma: 0.95
   device: "cuda"      # hoặc "cpu"
   num_workers: 4
   mixed_precision: true
