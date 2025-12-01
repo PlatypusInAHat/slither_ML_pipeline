@@ -3,50 +3,48 @@ import json
 import subprocess
 import re
 from pathlib import Path
+from typing import Dict, Any
 
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
-START_IDX = 39826
-END_IDX   = 200000  # duyệt tới < 200000
+# =========================
+# CẤU HÌNH CƠ BẢN
+# =========================
 
-REPO_ROOT = Path(r"D:\slither-ml-pipeline")
+# Chỉ duyệt các contract có idx trong [START_IDX, END_IDX)
+START_IDX = 60500
+END_IDX = 200000  # duyệt tới < 200000
+
+# Giới hạn token cho CodeBERT
+MAX_TOKENS = 510
+
+# Gốc repo (CHỈNH LẠI nếu folder repo nằm ở chỗ khác)
+REPO_ROOT = Path(r"D:\slither-ml-pipeline").resolve()
+
+# Thư mục cache cho HuggingFace (có thể chỉnh)
 HF_CACHE_ROOT = REPO_ROOT / "cache" / "hf"
 
-# --- cache ---
-os.environ["HF_HOME"] = str(HF_CACHE_ROOT)                      # gốc cho HF Hub
-os.environ["HF_HUB_CACHE"] = str(HF_CACHE_ROOT / "hub")         # cache file model/dataset từ Hub
-os.environ["HF_DATASETS_CACHE"] = str(HF_CACHE_ROOT / "datasets")  # cache arrow/dataset
+# Biến môi trường cache cho HF
+os.environ["HF_HOME"] = str(HF_CACHE_ROOT)
+os.environ["HF_HUB_CACHE"] = str(HF_CACHE_ROOT / "hub")
+os.environ["HF_DATASETS_CACHE"] = str(HF_CACHE_ROOT / "datasets")
 
-dataset = load_dataset(
-    "mwritescode/slither-audited-smart-contracts",
-    "big-multilabel",
-    split="train",
-    trust_remote_code=True,
-    verification_mode="no_checks",
-    cache_dir=r"D:\hf_cache",
-)
-# gốc repo (đổi lại nếu khác)
-REPO_ROOT     = Path(r"D:\slither-ml-pipeline")
+# Thư mục intermediate cho contract & report Slither
+DATA_INTERIM = REPO_ROOT / "data" / "interim" / "slither"
+CONTRACT_DIR = DATA_INTERIM / "contracts"
+REPORT_DIR = DATA_INTERIM / "reports"
 
-# nơi lưu file .sol tạm và báo cáo Slither (KHÔNG commit)
-DATA_INTERIM  = REPO_ROOT / "data" / "interim" / "slither"
-CONTRACT_DIR  = DATA_INTERIM / "contracts"
-REPORT_DIR    = DATA_INTERIM / "reports"
-
-# nơi ghi dataset đã xử lý để train
+# Thư mục output cho dataset đã xử lý
 DATA_PROCESSED = REPO_ROOT / "data" / "processed"
-OUT_PATH       = DATA_PROCESSED / "slither_big_multilabel.jsonl"
+OUT_PATH = DATA_PROCESSED / "dataset_from_hf.jsonl"
 
-# tạo thư mục nếu chưa có
+# Tạo thư mục nếu chưa có
 CONTRACT_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
 
-CONTRACT_DIR.mkdir(parents=True, exist_ok=True)
-REPORT_DIR.mkdir(parents=True, exist_ok=True)
-
-# chỉ quan tâm 4 loại
+# Chỉ quan tâm 4 loại label
 TARGET_LABELS = {
     "reentrancy",
     "timestamp_dependency",
@@ -54,7 +52,16 @@ TARGET_LABELS = {
     "tx_origin_misuse",
 }
 
+# Regex lấy pragma Solidity
 PRAGMA_RE = re.compile(r"pragma\s+solidity\s+([^;]+);", re.IGNORECASE)
+
+# Khởi tạo tokenizer CodeBERT
+tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
+
+
+# =========================
+# HÀM XỬ LÝ PRAGMA
+# =========================
 
 def _to_ver(tok: str):
     tok = tok.strip()
@@ -71,7 +78,12 @@ def _to_ver(tok: str):
     except ValueError:
         return None
 
+
 def pragma_compatible_with_0_8_17(pragma_raw: str) -> bool:
+    """
+    Kiểm tra pragma có tương thích với 0.8.x không.
+    (logic giống script em đang dùng)
+    """
     TARGET_MAJOR, TARGET_MINOR = 0, 8
     toks = pragma_raw.replace("&&", " ").split()
     ok = False
@@ -99,20 +111,28 @@ def pragma_compatible_with_0_8_17(pragma_raw: str) -> bool:
             v = _to_ver(tok)
             if not v:
                 return False
-            # đa số là <0.9.0 → cho qua
+            # đa số là <0.9.0 → cho qua; <0.8.0 thì loại
             if v[0] == 0 and v[1] < 8:
                 return False
         else:
             return False
     return ok
 
+
+# =========================
+# CLEAN CODE
+# =========================
+
 def strip_comments_and_whitespace(src: str) -> str:
+    """Loại bỏ comment /* */ và //, gom code về 1 dòng để tokenize."""
     src = re.sub(r"/\*[\s\S]*?\*/", "", src)
     src = re.sub(r"//.*", "", src)
     lines = [ln.strip() for ln in src.splitlines() if ln.strip()]
     return " ".join(lines)
 
+
 def normalize_label(name: str) -> str:
+    """Chuẩn hóa tên detector Slither về 4 label chính."""
     lower = name.lower()
     # 1. reentrancy
     if "reentr" in lower:
@@ -120,7 +140,7 @@ def normalize_label(name: str) -> str:
     # 2. timestamp
     if "timestamp" in lower or "time dependence" in lower or "predictable" in lower:
         return "timestamp_dependency"
-    # 3. unchecked / unhandled low level
+    # 3. unchecked / unhandled low level call
     if "unchecked" in lower or "unhandled" in lower or "low level" in lower or "send" in lower:
         return "unchecked_call"
     # 4. tx.origin
@@ -128,17 +148,35 @@ def normalize_label(name: str) -> str:
         return "tx_origin_misuse"
     return lower.replace(" ", "_")
 
-def parse_slither_json(path: Path):
+
+# =========================
+# PARSE SLITHER JSON
+# =========================
+
+def parse_slither_json(path: Path) -> Dict[str, Dict[str, str]]:
+    """
+    Đọc report Slither JSON và trả về:
+    {
+        "filename.sol": {
+            "funcName": "reentrancy",
+            ...
+        },
+        ...
+    }
+    Chỉ giữ lại label trong TARGET_LABELS, ưu tiên impact cao hơn.
+    """
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
+
     if isinstance(data, list):
         return {}
+
     detectors = data.get("results", {}).get("detectors", [])
     impact_rank = {"High": 3, "Medium": 2, "Low": 1, "Informational": 0}
-    per_file = {}
+    per_file: Dict[str, Dict[str, Any]] = {}
+
     for det in detectors:
         label = normalize_label(det.get("check", ""))
-        # chỉ quan tâm 4 loại
         if label not in TARGET_LABELS:
             continue
         impact = det.get("impact", "Low")
@@ -153,11 +191,23 @@ def parse_slither_json(path: Path):
             old = cur.get(func)
             if old is None or rank > old[1]:
                 cur[func] = (label, rank)
+
+    # chỉ giữ lại label, bỏ rank
     for fname in list(per_file.keys()):
         per_file[fname] = {fn: lr[0] for fn, lr in per_file[fname].items()}
+
     return per_file
 
+
+# =========================
+# EXTRACT FUNCTION SOURCE
+# =========================
+
 def extract_function_source(code: str, func_name: str) -> str:
+    """
+    Tìm đoạn source của function func_name trong code Solidity,
+    bao gồm toàn bộ thân hàm từ 'function ... {' đến '}' cuối cùng.
+    """
     pat = re.compile(
         r"\bfunction\s+" + re.escape(func_name) + r"\s*\([^)]*\)\s*[^{;]*\{",
         re.DOTALL,
@@ -181,82 +231,122 @@ def extract_function_source(code: str, func_name: str) -> str:
         return ""
     return code[m.start(): end_idx + 1]
 
-count_samples = 0
-count_skipped_pragma = 0
 
-with OUT_PATH.open("a", encoding="utf-8") as fout:
-    for idx, example in enumerate(dataset):
-        if idx < START_IDX:
-            continue
-        if idx >= END_IDX:
-            break
+# =========================
+# MAIN PIPELINE
+# =========================
 
-        src = example["source_code"]
+def main():
+    # Load dataset từ HuggingFace
+    dataset = load_dataset(
+        "mwritescode/slither-audited-smart-contracts",
+        "big-multilabel",
+        split="train",
+        trust_remote_code=True,
+        verification_mode="no_checks",
+        cache_dir=str(HF_CACHE_ROOT),
+    )
 
-        m = PRAGMA_RE.search(src)
-        if not m:
-            count_skipped_pragma += 1
-            continue
-        if not pragma_compatible_with_0_8_17(m.group(1).strip()):
-            count_skipped_pragma += 1
-            continue
+    count_samples = 0
+    count_skipped_pragma = 0
 
-        sol_path = CONTRACT_DIR / f"contract_{idx}.sol"
-        if not sol_path.exists():
-            sol_path.write_text(src, encoding="utf-8")
-
-        report_path = REPORT_DIR / f"contract_{idx}.json"
-
-        # chỉ chạy Slither nếu chưa có report để tiết kiệm thời gian
-        if not report_path.exists():
-            cmd = [
-                "python", "-m", "slither",
-                str(sol_path),
-                "--json", str(report_path),
-            ]
-            subprocess.run(cmd, check=False)
-
-        if not report_path.exists():
-            continue
-
-        vuln_map_all = parse_slither_json(report_path)
-        if not vuln_map_all:
-            continue
-
-        keys = [str(sol_path), sol_path.name, f"contracts/contract_{idx}.sol"]
-        vuln_map = None
-        for k in keys:
-            if k in vuln_map_all:
-                vuln_map = vuln_map_all[k]
-                break
-        if vuln_map is None:
-            first_file = next(iter(vuln_map_all.keys()))
-            vuln_map = vuln_map_all[first_file]
-
-        for func_name, label in vuln_map.items():
-            raw_func = extract_function_source(src, func_name)
-            if not raw_func:
+    with OUT_PATH.open("a", encoding="utf-8") as fout:
+        for idx, example in enumerate(dataset):
+            if idx < START_IDX:
                 continue
-            clean = strip_comments_and_whitespace(raw_func)
-            enc = tokenizer(
-                clean,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=MAX_TOKENS,
-                padding="max_length",
-            )
-            fout.write(json.dumps({
-                "orig_id": idx,
-                "file": str(sol_path),
-                "function": func_name,
-                "label": label,
-                "clean_code": clean,
-                "input_ids": enc["input_ids"],
-                "attention_mask": enc["attention_mask"],
-            }, ensure_ascii=False) + "\n")
-            count_samples += 1
+            if idx >= END_IDX:
+                break
 
-print("DONE.")
-print("samples ghi được:", count_samples)
-print("bỏ vì pragma:", count_skipped_pragma)
+            src = example["source_code"]
 
+            # Lọc theo pragma solidity
+            m = PRAGMA_RE.search(src)
+            if not m:
+                count_skipped_pragma += 1
+                continue
+            if not pragma_compatible_with_0_8_17(m.group(1).strip()):
+                count_skipped_pragma += 1
+                continue
+
+            # Ghi contract .sol
+            sol_path = CONTRACT_DIR / f"contract_{idx}.sol"
+            if not sol_path.exists():
+                sol_path.write_text(src, encoding="utf-8")
+
+            # Đường dẫn report Slither
+            report_path = REPORT_DIR / f"contract_{idx}.json"
+
+            # Chỉ chạy Slither nếu chưa có report (đỡ tốn thời gian)
+            if not report_path.exists():
+                cmd = [
+                    "python",
+                    "-m",
+                    "slither",
+                    str(sol_path),
+                    "--json",
+                    str(report_path),
+                ]
+                subprocess.run(cmd, check=False)
+
+            if not report_path.exists():
+                # Slither fail
+                continue
+
+            vuln_map_all = parse_slither_json(report_path)
+            if not vuln_map_all:
+                continue
+
+            # Map đúng key file trong report
+            keys = [
+                str(sol_path),
+                sol_path.name,
+                f"contracts/contract_{idx}.sol",
+            ]
+            vuln_map = None
+            for k in keys:
+                if k in vuln_map_all:
+                    vuln_map = vuln_map_all[k]
+                    break
+            if vuln_map is None:
+                first_file = next(iter(vuln_map_all.keys()))
+                vuln_map = vuln_map_all[first_file]
+
+            # Duyệt từng function có vuln
+            for func_name, label in vuln_map.items():
+                if label not in TARGET_LABELS:
+                    continue
+                raw_func = extract_function_source(src, func_name)
+                if not raw_func:
+                    continue
+                clean = strip_comments_and_whitespace(raw_func)
+                enc = tokenizer(
+                    clean,
+                    add_special_tokens=True,
+                    truncation=True,
+                    max_length=MAX_TOKENS,
+                    padding="max_length",
+                )
+                fout.write(
+                    json.dumps(
+                        {
+                            "orig_id": idx,
+                            "file": str(sol_path),
+                            "function": func_name,
+                            "label": label,
+                            "clean_code": clean,
+                            "input_ids": enc["input_ids"],
+                            "attention_mask": enc["attention_mask"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                count_samples += 1
+
+    print("DONE.")
+    print("samples ghi được:", count_samples)
+    print("bỏ vì pragma:", count_skipped_pragma)
+
+
+if __name__ == "__main__":
+    main()
