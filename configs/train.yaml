@@ -1,3 +1,32 @@
 ﻿seed: 42
-max_len: 510
+max_len: 512
 train_val_test: [0.8, 0.1, 0.1]
+
+# Model configuration
+model:
+  name: "microsoft/codebert-base"
+  num_labels: 4  # reentrancy, timestamp_dependency, unchecked_call, tx_origin_misuse
+  dropout: 0.1
+  hidden_size: 768
+  classifier_hidden_dim: 256
+
+# Training configuration
+training:
+  batch_size: 16
+  learning_rate: 2e-5
+  num_epochs: 10
+  warmup_steps: 500
+  weight_decay: 0.01
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  
+# Early stopping
+early_stopping:
+  patience: 3
+  min_delta: 0.001
+
+# Paths
+paths:
+  data_dir: "data/processed"
+  output_dir: "models/codebert"
+  log_dir: "logs"

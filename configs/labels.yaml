@@ -15,3 +15,5 @@
   tx_origin_misuse:
     - tx-origin
     - use of tx.origin
+  safe:
+    # Functions/contracts without vulnerabilities
